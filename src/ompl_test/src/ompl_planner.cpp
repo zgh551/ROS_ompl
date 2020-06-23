@@ -315,6 +315,25 @@ bool HasOverlap(const ObstacleBoundary& v, const ObstacleBoundary& o)
             o.width_half                                            ;
 }
 
+double MinDistance(const ObstacleBoundary& v, const ObstacleBoundary& o)
+{
+    if(v.boundary.high_x < o.boundary.low_x  ||
+       v.boundary.low_x  > o.boundary.high_x ||
+       v.boundary.high_y < o.boundary.low_y  ||
+       v.boundary.low_y  > o.boundary.high_y
+    )
+    {
+        if(v.boundary.high_x < o.boundary.low_x)
+        {
+
+        }
+    }
+    else
+    {
+        return 0.0;
+    }
+}
+
 class ValidityChecker : public ob::StateValidityChecker
 {
     public:
@@ -341,6 +360,24 @@ class ValidityChecker : public ob::StateValidityChecker
         }
         return true;
     }
+
+    double clearance(const ob::State* state) const override
+    {
+        const auto* stateE2 = state->as<ob::SE2StateSpace::StateType>();
+
+        vehicle_box.pose.x = stateE2->getX() + 0.5 * (FRONT_EDGE_TO_CENTER - REAR_EDGE_TO_CENTER);
+        vehicle_box.pose.y = stateE2->getY();
+        vehicle_box.pose.yaw = stateE2->getYaw();
+        vehicle_box.cos_heading = cos(vehicle_box.pose.yaw);
+        vehicle_box.sin_heading = sin(vehicle_box.pose.yaw);
+
+        InitCorners(vehicle_box);
+        for(auto b : obstacle_vehicle_boundary)
+        {
+            InitCorners(b);
+
+        }   
+    }
 };
 
 // the lenght optimization
@@ -348,6 +385,19 @@ ob::OptimizationObjectivePtr getPathLenghtObjective(const ob::SpaceInformationPt
 {
     return std::make_shared<ob::PathLengthOptimizationObjective>(si);
 }
+
+class ClearanceObjective : public ob::StateCostIntegralObjective
+{
+    ClearanceObjective(const ob::SpaceInformationPtr& si) : ob::StateCostIntegralObjective(si, true)
+    {
+
+    }
+
+    ob::Cost stateCost(const ob::State* s) const override
+    {
+        // return ob::Cost(1.0 - )
+    }
+};
 
 void SpaceInit(void)
 {
