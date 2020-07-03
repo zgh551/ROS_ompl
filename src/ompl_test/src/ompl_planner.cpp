@@ -96,6 +96,20 @@ typedef struct _Position{
     double yaw;
 }Position;
 
+typedef struct _Point{
+    double x;
+    double y;
+}Point;
+
+/***
+ * corner point order
+ * 
+ * (1) +---+ (4)
+ *     |   |
+ *     |   |
+ * (2) +---+ (3)
+ * 
+ * ***/
 typedef struct _ObstacleBoundary{
     double lenght;
     double width;
@@ -104,6 +118,7 @@ typedef struct _ObstacleBoundary{
     double cos_heading;
     double sin_heading;
     Position pose;
+    Point    corners[4];
     Boundary boundary={ std::numeric_limits<double>::max(),std::numeric_limits<double>::max(),
                         std::numeric_limits<double>::lowest(),std::numeric_limits<double>::lowest()};
 }ObstacleBoundary;
@@ -119,6 +134,7 @@ Position start_position;
 #define LR_EDGE_TO_CENTER    ( 0.9275 )
 double front_axis_lenght, rear_axis_lenght;
 double front_axis_angle, rear_axis_angle;
+double width_lenght_angle;
 
 
 // judge the point whether in the boundary 
@@ -156,6 +172,7 @@ void VehicleInit(void)
 
     vehicle_box.lenght_half = 0.5 * (FRONT_EDGE_TO_CENTER + REAR_EDGE_TO_CENTER);
     vehicle_box.width_half  = LR_EDGE_TO_CENTER;
+    width_lenght_angle = atan(vehicle_box.lenght_half / vehicle_box.width_half);
 }
 
 // rotation the location 
@@ -167,6 +184,11 @@ void rotate(const double& init_x, const double& init_y, const double& yaw, doubl
 
     goal_x = init_x * c_vl - init_y * s_vl;
     goal_y = init_x * s_vl + init_y * c_vl;
+}
+
+double distance(const double& x1,const double& y1, const double& x2, const double& y2)
+{
+    return sqrt( pow(x2 - x1, 2) + pow(y2 - y1, 2));
 }
 
 // calculate the vehicle edge
@@ -197,41 +219,6 @@ void VehicleEdge(const double& x, const double& y, const double& yaw,std::vector
     temp_p.y += y;
     temp_p.yaw = yaw;
     p.push_back(temp_p);
-}
-
-bool ompl_StateValidityCheckerFunction(const ob::State *state)
-{
-    const auto* stateE2 = state->as<ob::SE2StateSpace::StateType>();
-    
-    double x = stateE2->getX();
-    double y = stateE2->getY();
-    double yaw = stateE2->getYaw();
-
-    // for(auto b : obstacle_vehicle_boundary)
-    // {
-    //     Boundary exp_b;
-    //     if(isInBoundary(x, y, b))
-    //     {
-    //         return false;
-    //     }
-    //     else
-    //     {
-    //         BoundaryExpand(b, exp_b, 2.5);
-    //         if(isInBoundary(x, y, exp_b))
-    //         {
-    //             std::vector<Position> temp_p;
-    //             VehicleEdge(x, y, yaw, temp_p);
-    //             for(auto p : temp_p)
-    //             {
-    //                 if(isInBoundary(p.x, p.y, b))
-    //                 {
-    //                     return false;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-    return true;
 }
 
 void InitCorners(ObstacleBoundary& v)
@@ -315,21 +302,125 @@ bool HasOverlap(const ObstacleBoundary& v, const ObstacleBoundary& o)
             o.width_half                                            ;
 }
 
+void updateCorners(ObstacleBoundary& v)
+{
+    double temp_x, temp_y;
+
+    v.corners[0].x = v.lenght_half;
+    v.corners[0].y = v.width_half;
+
+    v.corners[1].x = -v.lenght_half;
+    v.corners[1].y = v.width_half; 
+
+    v.corners[2].x = -v.lenght_half;
+    v.corners[2].y = -v.width_half; 
+
+    v.corners[3].x = v.lenght_half;
+    v.corners[3].y = -v.width_half;
+
+    for(uint8_t i=0; i< 4; i++)
+    {
+        rotate(v.corners[i].x, v.corners[i].y, v.pose.yaw, temp_x, temp_y);
+        v.corners[i].x = v.pose.x + temp_x;
+        v.corners[i].y = v.pose.y + temp_y;
+    }
+}
+
 double MinDistance(const ObstacleBoundary& v, const ObstacleBoundary& o)
 {
     if(v.boundary.high_x < o.boundary.low_x  ||
        v.boundary.low_x  > o.boundary.high_x ||
        v.boundary.high_y < o.boundary.low_y  ||
        v.boundary.low_y  > o.boundary.high_y
-    )
+    )// boundary without collision
     {
         if(v.boundary.high_x < o.boundary.low_x)
         {
-
+            if(v.boundary.low_y > o.boundary.high_y)
+            {
+                return sqrt(pow(v.boundary.high_x - o.boundary.low_x, 2) + pow(v.boundary.low_y - o.boundary.high_y, 2));
+            }
+            else if(v.boundary.high_y < o.boundary.low_y)
+            {
+                return sqrt(pow(v.boundary.high_x - o.boundary.low_x, 2) + pow(v.boundary.high_y - o.boundary.low_y, 2));
+            }
+            else
+            {
+                return o.boundary.low_x - v.boundary.high_x;
+            }
+        }
+        else if(v.boundary.low_x > o.boundary.high_x)
+        {
+            if(v.boundary.low_y > o.boundary.high_y)
+            {
+                return sqrt(pow(v.boundary.low_x - o.boundary.high_x, 2) + pow(v.boundary.low_y - o.boundary.high_y, 2));
+            }
+            else if(v.boundary.high_y < o.boundary.low_y)
+            {
+                return sqrt(pow(v.boundary.low_x - o.boundary.high_x, 2) + pow(v.boundary.high_y - o.boundary.low_y, 2));
+            }
+            else
+            {
+                return v.boundary.low_x - o.boundary.high_x;
+            }
+        }
+        else
+        {
+            if(v.boundary.low_y > o.boundary.high_y)
+            {
+                return v.boundary.low_y - o.boundary.high_y;
+            }
+            else if(v.boundary.high_y < o.boundary.low_y)
+            {
+                return o.boundary.low_y - v.boundary.high_y;
+            }
+            else
+            {
+                return 0.0;
+            }
         }
     }
-    else
+    else // boundary with collision
     {
+        double min_lenght = std::numeric_limits<double>::max();
+        double temp_distance = 0;
+        uint8_t min_index = 0;
+        for(uint8_t i=0; i < 4; i++)
+        {
+            temp_distance = distance(v.pose.x, v.pose.y, o.corners[0].x, o.corners[0].y);
+            if( temp_distance < min_lenght)
+            {
+                min_index = i;
+                min_lenght = temp_distance;
+            }
+        }
+        
+        double theta = atan( fabs((v.pose.y - o.corners[min_index].y)/(v.pose.x - o.corners[min_index].x)) );
+        double alpha = fabs(v.pose.yaw - o.pose.yaw) ;
+        double delta = fabs(alpha - theta);
+        if(delta < width_lenght_angle)
+        {
+            double l = v.width_half / cos(delta);
+            double w = min_lenght * sin(delta);
+            if(l < min_lenght)
+            {
+                if(w < v.lenght_half)
+                {
+                    return (min_lenght / l -1.0) * v.width_half;
+                }
+                else
+                {
+
+                }
+                
+                
+            }
+        }
+        else
+        {
+            
+        }
+        
         return 0.0;
     }
 }
