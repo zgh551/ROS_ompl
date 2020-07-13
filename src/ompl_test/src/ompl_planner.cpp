@@ -387,41 +387,87 @@ double MinDistance(const ObstacleBoundary& v, const ObstacleBoundary& o)
         uint8_t min_index = 0;
         for(uint8_t i=0; i < 4; i++)
         {
-            temp_distance = distance(v.pose.x, v.pose.y, o.corners[0].x, o.corners[0].y);
+            temp_distance = distance(v.pose.x, v.pose.y, o.corners[i].x, o.corners[i].y);
             if( temp_distance < min_lenght)
             {
                 min_index = i;
                 min_lenght = temp_distance;
             }
+            else
+            {
+                
+            }
         }
-        
         double theta = atan( fabs((v.pose.y - o.corners[min_index].y)/(v.pose.x - o.corners[min_index].x)) );
         double alpha = fabs(v.pose.yaw - o.pose.yaw) ;
         double delta = fabs(alpha - theta);
         if(delta < width_lenght_angle)
         {
-            double l = v.width_half / cos(delta);
-            double w = min_lenght * sin(delta);
-            if(l < min_lenght)
+            double l_1 = v.width_half / cos(delta);
+            double w_1 = min_lenght * sin(delta);
+            if(l_1 < min_lenght)
             {
-                if(w < v.lenght_half)
+                if(w_1 < v.lenght_half)
                 {
-                    return (min_lenght / l -1.0) * v.width_half;
+                    return (min_lenght / l_1 -1.0) * v.width_half;
                 }
                 else
                 {
-
+                    min_lenght = std::numeric_limits<double>::max();
+                    for(uint8_t i=0; i < 4; i++)
+                    {
+                        temp_distance = distance(v.corners[i].x, v.corners[i].y, o.corners[min_index].x, o.corners[min_index].y);
+                        if( temp_distance < min_lenght)
+                        {
+                            min_lenght = temp_distance;
+                        }
+                        else
+                        {
+                            
+                        }
+                    }
+                    return min_lenght;
                 }
-                
-                
+            }
+            else
+            {
+                return 0.0;
             }
         }
         else
         {
-            
+            delta = fabs(M_PI_2 - alpha - theta);
+            double l2 = v.lenght_half / cos(delta);
+            double w2 = min_lenght * sin(delta);
+            if(l2 < min_lenght)
+            {
+                if(w2 < v.width_half)
+                {
+                    return (min_lenght / l2 -1.0) * v.lenght_half;
+                }
+                else
+                {
+                    min_lenght = std::numeric_limits<double>::max();
+                    for(uint8_t i=0; i < 4; i++)
+                    {
+                        temp_distance = distance(v.corners[i].x, v.corners[i].y, o.corners[min_index].x, o.corners[min_index].y);
+                        if( temp_distance < min_lenght)
+                        {
+                            min_lenght = temp_distance;
+                        }
+                        else
+                        {
+                            
+                        }
+                    }
+                    return min_lenght;
+                }
+            }
+            else
+            {
+                return 0.0;
+            }
         }
-        
-        return 0.0;
     }
 }
 
@@ -461,13 +507,25 @@ class ValidityChecker : public ob::StateValidityChecker
         vehicle_box.pose.yaw = stateE2->getYaw();
         vehicle_box.cos_heading = cos(vehicle_box.pose.yaw);
         vehicle_box.sin_heading = sin(vehicle_box.pose.yaw);
-
+        double min_distance = std::numeric_limits<double>::max();
+        double temp_distance = 0.0;
         InitCorners(vehicle_box);
+        updateCorners(vehicle_box);
         for(auto b : obstacle_vehicle_boundary)
         {
             InitCorners(b);
+            updateCorners(b);
+            temp_distance = MinDistance(vehicle_box, b);
+            if(temp_distance < min_distance)
+            {
+                min_distance = temp_distance;
+            }
+            else
+            {
 
-        }   
+            }
+        }
+        return min_distance;
     }
 };
 
@@ -479,6 +537,7 @@ ob::OptimizationObjectivePtr getPathLenghtObjective(const ob::SpaceInformationPt
 
 class ClearanceObjective : public ob::StateCostIntegralObjective
 {
+public:
     ClearanceObjective(const ob::SpaceInformationPtr& si) : ob::StateCostIntegralObjective(si, true)
     {
 
@@ -486,9 +545,21 @@ class ClearanceObjective : public ob::StateCostIntegralObjective
 
     ob::Cost stateCost(const ob::State* s) const override
     {
-        // return ob::Cost(1.0 - )
+        return ob::Cost( 1.0 - std::min(si->getStateValidityChecker()->clearance(s), 0.3)/0.3);
     }
 };
+
+ob::OptimizationObjectivePtr getClearanceObjective(const ob::SpaceInformationPtr& si)
+{
+    return std::make_shared<ClearanceObjective>(si);
+}
+
+ob::OptimizationObjectivePtr getBalanceObjective(const ob::SpaceInformationPtr& si)
+{
+    auto lenght_obj(std::make_shared<ob::PathLengthOptimizationObjective>(si));
+    auto clearance_obj(std::make_shared<ClearanceObjective>(si));
+    return 10.0 * lenght_obj + clearance_obj;
+}
 
 void SpaceInit(void)
 {
@@ -520,7 +591,11 @@ void SpaceInit(void)
     // std::shared_ptr<og::RRTstar> opt_plan = std::make_shared<og::RRTstar>(si);
 
     ss = std::make_shared<og::SimpleSetup>(si);
-    ss->setOptimizationObjective(getPathLenghtObjective(si));
+    // ss->setOptimizationObjective(getPathLenghtObjective(si));
+    // ss->setOptimizationObjective(getClearanceObjective(si));
+    ss->setOptimizationObjective(getBalanceObjective(si));
+    
+    
     // ss->setPlanner(std::make_shared<og::InformedRRTstar>(si));
     ss->setPlanner(std::make_shared<og::AITstar>(si));
 
@@ -553,7 +628,7 @@ void SpaceInit(void)
     temp_o.lenght =  5.0;
     temp_o.width  =  1.8;
     temp_o.pose.x =  1.5;
-    temp_o.pose.y =  7.0;
+    temp_o.pose.y =  6.0;
     temp_o.pose.yaw = 0.0;
     temp_o.lenght_half = temp_o.lenght * 0.5;
     temp_o.width_half  = temp_o.width * 0.5;
@@ -756,17 +831,17 @@ int main(int argc, char** argv)
                 }
                     
                 // simplify the sample point
-                ss->simplifySolution();
+                // ss->simplifySolution();
                 og::PathGeometric path = ss->getSolutionPath();
-                // update all the simplify point to the marker point
-                geometry_msgs::Point temp_p;
-                simplify_point.points.clear();
-                for(auto &state : path.getStates())
-                {
-                    temp_p.x = state->as<ob::SE2StateSpace::StateType>()->getX();
-                    temp_p.y = state->as<ob::SE2StateSpace::StateType>()->getY();
-                    simplify_point.points.push_back(temp_p);
-                }
+                // // update all the simplify point to the marker point
+                // geometry_msgs::Point temp_p;
+                // simplify_point.points.clear();
+                // for(auto &state : path.getStates())
+                // {
+                //     temp_p.x = state->as<ob::SE2StateSpace::StateType>()->getX();
+                //     temp_p.y = state->as<ob::SE2StateSpace::StateType>()->getY();
+                //     simplify_point.points.push_back(temp_p);
+                // }
 
                 // the interpolate process
                 path.interpolate(1000);
